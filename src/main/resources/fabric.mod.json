@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "superfarmer",
+  "version": "${version}",
+  "name": "Super Farmer",
+  "description": "A farmer who harvests and replants carrots and potatoes.",
+  "authors": ["SuperFarmer"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.superfarmer.SuperFarmer"],
+    "client": ["com.superfarmer.SuperFarmerClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
