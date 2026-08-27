@@ -16,20 +16,18 @@ import net.minecraft.world.level.block.state.BlockState;
 public class SuperFarmerEntity extends Villager {
     private int workCooldown = 0;
     private BlockPos targetCrop;
+    private BlockPos targetHopper;
+    private ItemStack carriedProduce = ItemStack.EMPTY;
 
     public SuperFarmerEntity(EntityType<? extends SuperFarmerEntity> entityType, Level level) {
         super(entityType, level);
         setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(ModItems.FARMER_HOE));
     }
 
-    /**
-     * Do not run Villager's Brain AI. That vanilla brain can acquire a farmer
-     * profession/job site and interact with composters. Mob navigation still
-     * ticks normally, while our own farming logic below controls the entity.
-     */
+    /** Disable the normal villager Brain so this entity never uses composters. */
     @Override
     protected void customServerAiStep(ServerLevel level) {
-        // Intentionally do not call super.customServerAiStep(level).
+        // Our own farming/delivery logic below controls this mob.
     }
 
     @Override
@@ -42,8 +40,22 @@ public class SuperFarmerEntity extends Villager {
             setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(ModItems.FARMER_HOE));
         }
 
+        // Show harvested produce in the off hand while the farmer is delivering it.
+        if (!carriedProduce.isEmpty()) {
+            setItemSlot(EquipmentSlot.OFFHAND, carriedProduce.copy());
+        } else if (!getOffhandItem().isEmpty()) {
+            setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+        }
+
         if (workCooldown > 0) workCooldown--;
 
+        // DELIVERY MODE: once crops are harvested, walk them to a hopper first.
+        if (!carriedProduce.isEmpty()) {
+            tickDelivery();
+            return;
+        }
+
+        // FARMING MODE: walk to mature crops and harvest them.
         if (targetCrop != null) {
             BlockState state = level().getBlockState(targetCrop);
             if (!isWantedMatureCrop(state)) {
@@ -66,6 +78,51 @@ public class SuperFarmerEntity extends Villager {
             if (targetCrop != null) {
                 getNavigation().moveTo(targetCrop.getX() + 0.5, targetCrop.getY(), targetCrop.getZ() + 0.5, 1.15);
             }
+        }
+    }
+
+    private void tickDelivery() {
+        if (targetHopper == null || !isUsableHopper(targetHopper, carriedProduce)) {
+            targetHopper = findNearestUsableHopper(24, carriedProduce);
+            getNavigation().stop();
+        }
+
+        // No hopper with room yet: keep the produce instead of composting/dropping it.
+        if (targetHopper == null) {
+            return;
+        }
+
+        double distance = distanceToSqr(
+                targetHopper.getX() + 0.5,
+                targetHopper.getY() + 0.5,
+                targetHopper.getZ() + 0.5
+        );
+
+        if (distance <= 4.0) {
+            BlockEntity blockEntity = level().getBlockEntity(targetHopper);
+            if (blockEntity instanceof Container container) {
+                insertIntoContainer(container, carriedProduce);
+                blockEntity.setChanged();
+            }
+
+            if (carriedProduce.isEmpty()) {
+                targetHopper = null;
+                getNavigation().stop();
+                workCooldown = 10;
+            } else {
+                // This hopper filled while we were walking to it; find another.
+                targetHopper = null;
+            }
+            return;
+        }
+
+        if (tickCount % 5 == 0) {
+            getNavigation().moveTo(
+                    targetHopper.getX() + 0.5,
+                    targetHopper.getY(),
+                    targetHopper.getZ() + 0.5,
+                    1.2
+            );
         }
     }
 
@@ -103,7 +160,6 @@ public class SuperFarmerEntity extends Villager {
         if (!isWantedMatureCrop(state)) return;
 
         ItemStack harvested;
-
         if (state.is(Blocks.CARROTS)) {
             harvested = new ItemStack(net.minecraft.world.item.Items.CARROT, 3);
         } else {
@@ -113,55 +169,80 @@ public class SuperFarmerEntity extends Villager {
         // Replant instantly by resetting the crop to age 0.
         level().setBlock(pos, state.getBlock().defaultBlockState(), 3);
 
-        // Super Farmer output goes to hoppers only. If there is no hopper with
-        // room, drop the produce at the harvested crop; never use composters.
-        if (!insertIntoNearbyHopper(harvested.copy())) {
-            net.minecraft.world.level.block.Block.popResource(level(), pos.above(), harvested);
+        // Carry the produce physically to a hopper.
+        carriedProduce = harvested;
+        targetHopper = findNearestUsableHopper(24, carriedProduce);
+        if (targetHopper != null) {
+            getNavigation().moveTo(
+                    targetHopper.getX() + 0.5,
+                    targetHopper.getY(),
+                    targetHopper.getZ() + 0.5,
+                    1.2
+            );
         }
     }
 
-    private boolean insertIntoNearbyHopper(ItemStack stack) {
+    private BlockPos findNearestUsableHopper(int radius, ItemStack stack) {
         BlockPos origin = blockPosition();
+        BlockPos nearest = null;
+        double nearestDistance = Double.MAX_VALUE;
 
-        for (int x = -8; x <= 8; x++) {
-            for (int y = -3; y <= 3; y++) {
-                for (int z = -8; z <= 8; z++) {
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -4; y <= 4; y++) {
+                for (int z = -radius; z <= radius; z++) {
                     BlockPos pos = origin.offset(x, y, z);
-                    if (!level().getBlockState(pos).is(Blocks.HOPPER)) continue;
+                    if (!isUsableHopper(pos, stack)) continue;
 
-                    BlockEntity blockEntity = level().getBlockEntity(pos);
-                    if (!(blockEntity instanceof Container container)) continue;
-
-                    if (insertIntoContainer(container, stack)) {
-                        blockEntity.setChanged();
-                        return true;
+                    double distance = pos.distSqr(origin);
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearest = pos.immutable();
                     }
                 }
+            }
+        }
+        return nearest;
+    }
+
+    private boolean isUsableHopper(BlockPos pos, ItemStack stack) {
+        if (!level().getBlockState(pos).is(Blocks.HOPPER)) return false;
+        BlockEntity blockEntity = level().getBlockEntity(pos);
+        if (!(blockEntity instanceof Container container)) return false;
+
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            ItemStack existing = container.getItem(slot);
+            if (existing.isEmpty()) return true;
+            if (ItemStack.isSameItemSameComponents(existing, stack)
+                    && existing.getCount() < Math.min(existing.getMaxStackSize(), container.getMaxStackSize())) {
+                return true;
             }
         }
         return false;
     }
 
-    private boolean insertIntoContainer(Container container, ItemStack stack) {
-        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+    private void insertIntoContainer(Container container, ItemStack stack) {
+        for (int slot = 0; slot < container.getContainerSize() && !stack.isEmpty(); slot++) {
             ItemStack existing = container.getItem(slot);
 
             if (existing.isEmpty()) {
-                container.setItem(slot, stack.copy());
-                stack.setCount(0);
-                return true;
+                int moved = Math.min(stack.getCount(), Math.min(stack.getMaxStackSize(), container.getMaxStackSize()));
+                ItemStack inserted = stack.copy();
+                inserted.setCount(moved);
+                container.setItem(slot, inserted);
+                stack.shrink(moved);
+                continue;
             }
 
-            if (ItemStack.isSameItemSameComponents(existing, stack) && existing.getCount() < existing.getMaxStackSize()) {
-                int room = existing.getMaxStackSize() - existing.getCount();
+            if (ItemStack.isSameItemSameComponents(existing, stack)) {
+                int max = Math.min(existing.getMaxStackSize(), container.getMaxStackSize());
+                int room = max - existing.getCount();
+                if (room <= 0) continue;
+
                 int moved = Math.min(room, stack.getCount());
                 existing.grow(moved);
                 stack.shrink(moved);
                 container.setItem(slot, existing);
-
-                if (stack.isEmpty()) return true;
             }
         }
-        return stack.isEmpty();
     }
 }
