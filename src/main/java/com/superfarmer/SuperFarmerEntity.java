@@ -1,11 +1,14 @@
 package com.superfarmer;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.npc.villager.Villager;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CropBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 public class SuperFarmerEntity extends Villager {
@@ -30,19 +33,19 @@ public class SuperFarmerEntity extends Villager {
                 targetCrop = null;
             } else {
                 double distance = distanceToSqr(targetCrop.getX() + 0.5, targetCrop.getY() + 0.5, targetCrop.getZ() + 0.5);
-                if (distance <= 3.0) {
+                if (distance <= 4.0) {
                     harvest(targetCrop, state);
                     targetCrop = null;
-                    workCooldown = 20;
-                } else if (tickCount % 10 == 0) {
+                    workCooldown = 10;
+                } else if (tickCount % 5 == 0) {
                     getNavigation().moveTo(targetCrop.getX() + 0.5, targetCrop.getY(), targetCrop.getZ() + 0.5, 1.15);
                 }
                 return;
             }
         }
 
-        if (workCooldown == 0 && tickCount % 20 == 0) {
-            targetCrop = findNearestCrop(10);
+        if (workCooldown == 0 && tickCount % 10 == 0) {
+            targetCrop = findNearestCrop(16);
             if (targetCrop != null) {
                 getNavigation().moveTo(targetCrop.getX() + 0.5, targetCrop.getY(), targetCrop.getZ() + 0.5, 1.15);
             }
@@ -55,7 +58,7 @@ public class SuperFarmerEntity extends Villager {
         double nearestDistance = Double.MAX_VALUE;
 
         for (int x = -radius; x <= radius; x++) {
-            for (int y = -2; y <= 2; y++) {
+            for (int y = -3; y <= 3; y++) {
                 for (int z = -radius; z <= radius; z++) {
                     BlockPos pos = origin.offset(x, y, z);
                     BlockState state = level().getBlockState(pos);
@@ -63,7 +66,7 @@ public class SuperFarmerEntity extends Villager {
                         double distance = pos.distSqr(origin);
                         if (distance < nearestDistance) {
                             nearestDistance = distance;
-                            nearest = pos;
+                            nearest = pos.immutable();
                         }
                     }
                 }
@@ -82,10 +85,69 @@ public class SuperFarmerEntity extends Villager {
     private void harvest(BlockPos pos, BlockState state) {
         if (!isWantedMatureCrop(state)) return;
 
-        // Drop the normal vanilla crop loot. Hoppers nearby can collect these drops normally.
-        net.minecraft.world.level.block.Block.dropResources(state, level(), pos);
+        ItemStack harvested;
+        ItemStack replant;
 
-        // Replant the crop immediately.
-        level().setBlock(pos, state.getBlock().defaultBlockState(), 2);
+        if (state.is(Blocks.CARROTS)) {
+            harvested = new ItemStack(net.minecraft.world.item.Items.CARROT, 3);
+            replant = new ItemStack(net.minecraft.world.item.Items.CARROT, 1);
+        } else {
+            harvested = new ItemStack(net.minecraft.world.item.Items.POTATO, 3);
+            replant = new ItemStack(net.minecraft.world.item.Items.POTATO, 1);
+        }
+
+        // Replant immediately so the field stays intact.
+        level().setBlock(pos, state.getBlock().defaultBlockState(), 3);
+
+        // Try to place produce directly into a nearby hopper/container.
+        if (!insertIntoNearbyHopper(harvested.copy())) {
+            // If no hopper is available, drop the produce at the crop so a hopper can still collect it.
+            net.minecraft.world.level.block.Block.popResource(level(), pos.above(), harvested);
+        }
+    }
+
+    private boolean insertIntoNearbyHopper(ItemStack stack) {
+        BlockPos origin = blockPosition();
+
+        for (int x = -8; x <= 8; x++) {
+            for (int y = -3; y <= 3; y++) {
+                for (int z = -8; z <= 8; z++) {
+                    BlockPos pos = origin.offset(x, y, z);
+                    if (!level().getBlockState(pos).is(Blocks.HOPPER)) continue;
+
+                    BlockEntity blockEntity = level().getBlockEntity(pos);
+                    if (!(blockEntity instanceof Container container)) continue;
+
+                    if (insertIntoContainer(container, stack)) {
+                        blockEntity.setChanged();
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean insertIntoContainer(Container container, ItemStack stack) {
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            ItemStack existing = container.getItem(slot);
+
+            if (existing.isEmpty()) {
+                container.setItem(slot, stack.copy());
+                stack.setCount(0);
+                return true;
+            }
+
+            if (ItemStack.isSameItemSameComponents(existing, stack) && existing.getCount() < existing.getMaxStackSize()) {
+                int room = existing.getMaxStackSize() - existing.getCount();
+                int moved = Math.min(room, stack.getCount());
+                existing.grow(moved);
+                stack.shrink(moved);
+                container.setItem(slot, existing);
+
+                if (stack.isEmpty()) return true;
+            }
+        }
+        return stack.isEmpty();
     }
 }
