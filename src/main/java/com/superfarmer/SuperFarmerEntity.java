@@ -3,6 +3,7 @@ package com.superfarmer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -17,6 +18,7 @@ public class SuperFarmerEntity extends Villager {
 
     public SuperFarmerEntity(EntityType<? extends SuperFarmerEntity> entityType, Level level) {
         super(entityType, level);
+        setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(ModItems.FARMER_HOE));
     }
 
     @Override
@@ -24,6 +26,10 @@ public class SuperFarmerEntity extends Villager {
         super.tick();
 
         if (level().isClientSide()) return;
+
+        if (getMainHandItem().isEmpty()) {
+            setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(ModItems.FARMER_HOE));
+        }
 
         if (workCooldown > 0) workCooldown--;
 
@@ -86,22 +92,16 @@ public class SuperFarmerEntity extends Villager {
         if (!isWantedMatureCrop(state)) return;
 
         ItemStack harvested;
-        ItemStack replant;
 
         if (state.is(Blocks.CARROTS)) {
             harvested = new ItemStack(net.minecraft.world.item.Items.CARROT, 3);
-            replant = new ItemStack(net.minecraft.world.item.Items.CARROT, 1);
         } else {
             harvested = new ItemStack(net.minecraft.world.item.Items.POTATO, 3);
-            replant = new ItemStack(net.minecraft.world.item.Items.POTATO, 1);
         }
 
-        // Replant immediately so the field stays intact.
         level().setBlock(pos, state.getBlock().defaultBlockState(), 3);
 
-        // Try to place produce directly into a nearby hopper/container.
         if (!insertIntoNearbyHopper(harvested.copy())) {
-            // If no hopper is available, drop the produce at the crop so a hopper can still collect it.
             net.minecraft.world.level.block.Block.popResource(level(), pos.above(), harvested);
         }
     }
