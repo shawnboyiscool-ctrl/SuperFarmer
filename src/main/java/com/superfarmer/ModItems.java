@@ -14,11 +14,18 @@ import net.minecraft.world.item.SpawnEggItem;
 
 public final class ModItems {
     public static final ResourceKey<Item> SUPER_FARMER_SPAWN_EGG_ID = create("super_farmer_spawn_egg");
+    public static final ResourceKey<Item> FARMER_HOE_ID = create("farmer_hoe");
 
     public static final Item SUPER_FARMER_SPAWN_EGG = register(
             SUPER_FARMER_SPAWN_EGG_ID,
             SpawnEggItem::new,
             new Item.Properties().spawnEgg(ModEntityTypes.SUPER_FARMER)
+    );
+
+    public static final Item FARMER_HOE = register(
+            FARMER_HOE_ID,
+            Item::new,
+            new Item.Properties().stacksTo(1)
     );
 
     private static ResourceKey<Item> create(String name) {
