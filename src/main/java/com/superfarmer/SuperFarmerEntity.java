@@ -1,6 +1,7 @@
 package com.superfarmer;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -19,6 +20,16 @@ public class SuperFarmerEntity extends Villager {
     public SuperFarmerEntity(EntityType<? extends SuperFarmerEntity> entityType, Level level) {
         super(entityType, level);
         setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(ModItems.FARMER_HOE));
+    }
+
+    /**
+     * Do not run Villager's Brain AI. That vanilla brain can acquire a farmer
+     * profession/job site and interact with composters. Mob navigation still
+     * ticks normally, while our own farming logic below controls the entity.
+     */
+    @Override
+    protected void customServerAiStep(ServerLevel level) {
+        // Intentionally do not call super.customServerAiStep(level).
     }
 
     @Override
@@ -99,8 +110,11 @@ public class SuperFarmerEntity extends Villager {
             harvested = new ItemStack(net.minecraft.world.item.Items.POTATO, 3);
         }
 
+        // Replant instantly by resetting the crop to age 0.
         level().setBlock(pos, state.getBlock().defaultBlockState(), 3);
 
+        // Super Farmer output goes to hoppers only. If there is no hopper with
+        // room, drop the produce at the harvested crop; never use composters.
         if (!insertIntoNearbyHopper(harvested.copy())) {
             net.minecraft.world.level.block.Block.popResource(level(), pos.above(), harvested);
         }
