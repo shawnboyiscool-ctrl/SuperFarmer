@@ -1,5 +1,3 @@
-# Super Farmer
+# SuperFarmer
 
-Minecraft 26.2 Fabric mod. The GitHub Actions workflow builds the mod JAR automatically.
-
-Use `/summon superfarmer:super_farmer` or the Super Farmer Spawn Egg.
+Fabric 26.2 Super Farmer mod with custom spawn egg, farmer skin, hoe, crop harvesting/replanting, and nearby hopper delivery.
